@@ -12,9 +12,10 @@ export const SYMBOL_ARRAY_HOLE = Symbol("ARRAY_HOLE");
  * A type that we can serialize automatically, sometimes occupying more bytes
  * (if e.g. types need to be encoded), but easily marshalling more arbitrary data.
  */
-export type Serializable = undefined | null | boolean | number | string | typeof SYMBOL_ARRAY_HOLE |
-  Date |
-  Serializable[] | Set<Serializable> //| { [field: string]: POJO };
+export type Serializable = undefined | null | boolean | number | string | typeof SYMBOL_ARRAY_HOLE
+  | Date
+  | Serializable[] | Set<Serializable>
+  | { [field: string]: Serializable };
 
 const TYPE_NULL = 0;
 const TYPE_FALSE = 1;
@@ -33,6 +34,7 @@ const TYPE_ARRAY_HOLE = 13;
 const TYPE_ARRAY = 14;
 const TYPE_SET = 15;
 const TYPE_DATE = 16;
+const TYPE_STROBJECT = 17;
 const TYPE_SMALLINT_ZERO = 100;
 const TYPE_SMALLINT_MAX = 250;
 
@@ -341,6 +343,7 @@ export class PackedBuffer {
   /**
    * Write any serializable type. The primatives take no more space than if they were encoded directly.
    * More complex types are encoded efficiently, but probably not quite as well as if they had specialized algorithms.
+   * With objects, fields are encoded as tokens, anticipating having many of the same type of object.
    */
   writeSerializable(x: Serializable): this {
     // istanbul ignore next
@@ -371,14 +374,16 @@ export class PackedBuffer {
       }
     } else if (typeof x === "undefined") {
       this.buf[this.idx++] = TYPE_UNDEFINED;
-      // } else if ( x instanceof ObjectRef ) {
-      //     if ( x.isNull ) {
-      //         this.buf[this.idx++] = TYPE_OBJECT_REF_NULL;
-      //     } else {
-      //         this.buf[this.idx++] = TYPE_OBJECT_REF;
-      //         this.writeInteger(x.t);
-      //         this.writeInteger(x.a);
-      //     }
+    } else if (typeof x === "string") {
+      if (x.length === 0) {
+        this.buf[this.idx++] = TYPE_STRING_LENGTH_ZERO;
+      } else if (x.length === 1) {
+        this.buf[this.idx++] = TYPE_STRING_LENGTH_ONE;        // common case for collaborative text, and we can be especially space-efficient
+        this.writeSmallNonNegativeInteger(x.charCodeAt(0));
+      } else {
+        this.buf[this.idx++] = TYPE_STRING;
+        this.writeString(x);
+      }
     } else if (x === SYMBOL_ARRAY_HOLE) {
       this.buf[this.idx++] = TYPE_ARRAY_HOLE;
     } else if (x instanceof Date) {
@@ -390,14 +395,9 @@ export class PackedBuffer {
     } else if (x instanceof Set) {
       this.buf[this.idx++] = TYPE_SET;
       this.writeArray(Array.from(x), (buf, el) => buf.writeSerializable(el));
-    } else if (x.length === 0) {
-      this.buf[this.idx++] = TYPE_STRING_LENGTH_ZERO;
-    } else if (x.length === 1) {
-      this.buf[this.idx++] = TYPE_STRING_LENGTH_ONE;        // common case for collaborative text, and we can be especially space-efficient
-      this.writeSmallNonNegativeInteger(x.charCodeAt(0));
-    } else {
-      this.buf[this.idx++] = TYPE_STRING;
-      this.writeString(x);
+    } else if (typeof x === "object") {
+      this.buf[this.idx++] = TYPE_STROBJECT;
+      this.writeArray(Object.entries(x), (buf, el) => buf.writeToken(el[0]).writeSerializable(el[1]));
     }
     return this
   }
@@ -430,9 +430,11 @@ export class PackedBuffer {
       case TYPE_NEGATIVE_INFINITY: return Number.NEGATIVE_INFINITY
       case TYPE_NAN: return Number.NaN;
       case TYPE_ARRAY_HOLE: return SYMBOL_ARRAY_HOLE;
+      case TYPE_DATE: return new Date(this.readInteger());
       case TYPE_ARRAY: return this.readArray((buf) => buf.readSerializable());
       case TYPE_SET: return new Set(this.readArray((buf) => buf.readSerializable()));
-      case TYPE_DATE: return new Date(this.readInteger());
+      case TYPE_STROBJECT: return Object.fromEntries(this.readArray((buf) => { const k = buf.readToken(); return [k, buf.readSerializable()] }));
+
     }
     throw new Error(`invalid scalar prefix byte: ${t}`);
   }

@@ -296,6 +296,7 @@ test("serializable", () => {
     [], [1], [undefined], [null, undefined, "123", "", ["taco", []], []],
     new Set(), new Set([1, 2, "foo", 1, 2, 3]),
     new Date(), new Date(1234567890),
+    {}, { foo: 1 }, { bar: [1, 2, { baz: "bat" }], a: 1.23456, b: new Date(), c: undefined, d: "c" },
   ]
   for (let i = -10000; i < 10000; ++i) scalars.push(i);   // integers around the "small" boundaries, where we might have optimizations
 
