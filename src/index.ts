@@ -101,8 +101,12 @@ export class PackedBuffer {
     this.buf = a ? a : new Uint8Array(1024);
   }
 
-  getBuffer(): Uint8Array {
+  getByteArray(): Uint8Array {
     return this.buf.subarray(0, this.idx);
+  }
+
+  getBuffer(): Buffer {
+    return Buffer.from(this.getByteArray())
   }
 
   rewind(): this {
@@ -124,6 +128,20 @@ export class PackedBuffer {
    */
   get length(): number {
     return this.buf.length;
+  }
+
+  /**
+   * Converts the entire buffer to a Base64-encoded string.
+   */
+  toBase64(): string {
+    return this.getBuffer().toString('base64')
+  }
+
+  /**
+   * Returns a new `PackedBuffer` sourced from a Base64-encoded string.
+   */
+  static fromBase64(base64: string): PackedBuffer {
+    return new PackedBuffer(new Uint8Array(Buffer.from(base64, 'base64')))
   }
 
   ensureMoreSpace(additionalBytes: number): this {

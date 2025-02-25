@@ -24,7 +24,7 @@ test("bytes", () => {
     for (let k = 0; k < n; ++k) {
       writer((k + 17) & 0xff);
     }
-    const bufCopy = buf.getBuffer();
+    const bufCopy = buf.getByteArray();
     if (bufCopy.length !== n) expect(bufCopy.length).toEqual(n);
     buf.rewind();
     for (let k = 0; k < n; ++k) {
@@ -220,10 +220,10 @@ test("tokens", () => {
   const buf = new PackedBuffer();
   buf.writeToken("foo");
   buf.writeToken("bar");
-  const lenFirst = buf.getBuffer().length;
+  const lenFirst = buf.getByteArray().length;
   buf.writeToken("foo");
   buf.writeToken("bar");
-  const lenSecond = buf.getBuffer().length;
+  const lenSecond = buf.getByteArray().length;
   expect(lenSecond - lenFirst).toBeLessThan(lenFirst);      // used fewer bytes the second time
   buf.rewind();
   expect(buf.readToken()).toEqual("foo");
@@ -358,4 +358,14 @@ test("serialized custom type", () => {
     expect(newObj.foo).toEqual(123)
     expect(newObj.bar).toEqual("hello")
   }
+})
+
+test('base64 encoding', () => {
+  const buf = new PackedBuffer()
+  buf.writeSerializable([1, 2, 3])
+  const b64 = buf.toBase64()
+  const buf2 = PackedBuffer.fromBase64(b64)
+  const y = buf2.readSerializable()
+  expect(y).toEqual([1, 2, 3])
+  expect(buf2.toBase64()).toEqual(b64)
 })
