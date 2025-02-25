@@ -293,7 +293,8 @@ test("serializable", () => {
     true, false,
     undefined, null, SYMBOL_ARRAY_HOLE,
     "", "a", "123", "0", "foo", "ab\ncd", "\x00\x01\xff\x00", "\x00\x01\x7f\x00", "\u1234\u4321\u6034\ufefe\uffee\uffff\ufffe", "\ud83c\udf09",
-    [], [1], [undefined], [null, undefined, "123", "", ["taco", []], []]
+    [], [1], [undefined], [null, undefined, "123", "", ["taco", []], []],
+    new Set(), new Set([1, 2, "foo", 1, 2, 3]),
   ]
   for (let i = -10000; i < 10000; ++i) scalars.push(i);   // integers around the "small" boundaries, where we might have optimizations
 
