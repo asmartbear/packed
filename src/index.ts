@@ -12,7 +12,7 @@ export const SYMBOL_ARRAY_HOLE = Symbol("ARRAY_HOLE");
  * A type that we can serialize automatically, sometimes occupying more bytes
  * (if e.g. types need to be encoded), but easily marshalling more arbitrary data.
  */
-export type Serializable = undefined | null | boolean | number | string | typeof SYMBOL_ARRAY_HOLE //| POJO[] | { [field: string]: POJO };
+export type Serializable = undefined | null | boolean | number | string | typeof SYMBOL_ARRAY_HOLE | Serializable[] //| { [field: string]: POJO };
 
 const TYPE_NULL = 0;
 const TYPE_FALSE = 1;
@@ -28,6 +28,7 @@ const TYPE_UNDEFINED = 10;
 const TYPE_STRING_LENGTH_ZERO = 11;
 const TYPE_STRING_LENGTH_ONE = 12;
 const TYPE_ARRAY_HOLE = 13;
+const TYPE_ARRAY = 14;
 const TYPE_SMALLINT_ZERO = 100;
 const TYPE_SMALLINT_MAX = 250;
 
@@ -376,6 +377,9 @@ export class PackedBuffer {
       //     }
     } else if (x === SYMBOL_ARRAY_HOLE) {
       this.buf[this.idx++] = TYPE_ARRAY_HOLE;
+    } else if (Array.isArray(x)) {
+      this.buf[this.idx++] = TYPE_ARRAY;
+      this.writeArray(x, (buf, el) => buf.writeSerializable(el));
     } else if (x.length === 0) {
       this.buf[this.idx++] = TYPE_STRING_LENGTH_ZERO;
     } else if (x.length === 1) {
@@ -416,6 +420,7 @@ export class PackedBuffer {
       case TYPE_NEGATIVE_INFINITY: return Number.NEGATIVE_INFINITY
       case TYPE_NAN: return Number.NaN;
       case TYPE_ARRAY_HOLE: return SYMBOL_ARRAY_HOLE;
+      case TYPE_ARRAY: return this.readArray((buf) => buf.readSerializable());
     }
     throw new Error(`invalid scalar prefix byte: ${t}`);
   }
