@@ -1,4 +1,4 @@
-import { PackedBuffer, JsonType, Serializable, SYMBOL_ARRAY_HOLE } from '../src/index'
+import { PackedBuffer, JsonType, Serializable, SYMBOL_ARRAY_HOLE, ISerializable, ISerializeInstructions } from '../src/index'
 
 /**
  * Returns the set of Fibbonaci numbers from 0 to `max` inclusive.
@@ -285,9 +285,9 @@ test("array (with callback)", () => {
   }
 });
 
-test("serializable", () => {
+test("serializable built-ins", () => {
   const scalars: Serializable[] = [
-    0, 1, -1, 3.1456, -234234, -1234.5678,
+    0, 1, -1, 123, 3.1456, -234234, -1234.5678,
     Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MIN_VALUE, Number.MAX_VALUE,
     Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY,
     true, false,
@@ -318,4 +318,44 @@ test("serializable", () => {
   buf.rewind()
   expect(() => buf.readSerializable()).toThrowError()
 
+})
+
+test("serialized custom type", () => {
+  class CustomSerialization implements ISerializeInstructions<CustomObject> {
+    name = "mr. taco"
+    serialize(buf: PackedBuffer, obj: CustomObject): void {
+      buf.writeInteger(obj.foo)
+      buf.writeString(obj.bar)
+    }
+    unserialize(buf: PackedBuffer) {
+      const obj = new CustomObject()
+      obj.foo = buf.readInteger()
+      obj.bar = buf.readString()
+      return obj
+    }
+  }
+  const custSer = new CustomSerialization()
+  class CustomObject implements ISerializable<CustomObject> {
+    foo: number = 0
+    bar: string = ""
+    serializationInstructions = custSer
+  }
+  const origObj = new CustomObject()
+  origObj.foo = 123
+  origObj.bar = "hello"
+
+  const buf = new PackedBuffer()
+  buf.writeSerializable(origObj)
+  buf.rewind()
+  expect(() => buf.readSerializable()).toThrowError() // the instructions aren't registered
+  buf.registerSerializer(custSer)
+  buf.rewind()
+  const newObj = buf.readSerializable()
+  expect(newObj instanceof CustomObject).toEqual(true)
+  origObj.foo = 321   // change original to show `new` is a new object
+  origObj.bar = "goodbye"
+  if (newObj instanceof CustomObject) {   // for typescript's benefit; we just asserted it!
+    expect(newObj.foo).toEqual(123)
+    expect(newObj.bar).toEqual("hello")
+  }
 })

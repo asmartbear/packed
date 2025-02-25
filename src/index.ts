@@ -9,13 +9,49 @@ export type JsonType = null | boolean | number | string | Array<JsonType> | { [f
 export const SYMBOL_ARRAY_HOLE = Symbol("ARRAY_HOLE");
 
 /**
+ * An object that knows how to serialize and unserialize some object-type.
+ * Has a stable name, so it can be registered and invoked.
+ */
+export interface ISerializeInstructions<T> {
+  /**
+   * Unique name of the type, used to identify it in the serialization stream.
+   */
+  name: string,
+  /**
+   * Seralizes an object into the given buffer.
+   */
+  serialize(buf: PackedBuffer, obj: T): void,
+  /**
+   * Unserialize an instance of the object from the given buffer.
+   */
+  unserialize(buf: PackedBuffer): T,
+}
+
+/**
+ * An object that has instructions for how to serialize and unserialize it.
+ * 
+ * It's separated from the instructions, because we need the instructions object to unserialize new instances later.
+ */
+export interface ISerializable<T> {
+  serializationInstructions: ISerializeInstructions<T>;
+}
+
+/**
+ * Run-time type guard for an object for which we can register a serialization routine.
+ */
+function isObjectSerializable(x: any): x is ISerializable<any> {
+  return x && typeof x === "object" && "serializationInstructions" in x && typeof x.serializationInstructions === "object";
+}
+
+/**
  * A type that we can serialize automatically, sometimes occupying more bytes
  * (if e.g. types need to be encoded), but easily marshalling more arbitrary data.
  */
 export type Serializable = undefined | null | boolean | number | string | typeof SYMBOL_ARRAY_HOLE
   | Date
   | Serializable[] | Set<Serializable>
-  | { [field: string]: Serializable };
+  | { [field: string]: Serializable }
+  | ISerializable<any>;
 
 const TYPE_NULL = 0;
 const TYPE_FALSE = 1;
@@ -35,6 +71,7 @@ const TYPE_ARRAY = 14;
 const TYPE_SET = 15;
 const TYPE_DATE = 16;
 const TYPE_STROBJECT = 17;
+const TYPE_REGISTERED = 18;
 const TYPE_SMALLINT_ZERO = 100;
 const TYPE_SMALLINT_MAX = 250;
 
@@ -58,6 +95,7 @@ export class PackedBuffer {
   public idx: number = 0;
   private tokenList: string[] = [];
   private tokenMap = new Map<string, number>();
+  private registeredSerializers = new Map<string, ISerializeInstructions<any>>();
 
   constructor(a?: Uint8Array) {
     this.buf = a ? a : new Uint8Array(1024);
@@ -69,15 +107,17 @@ export class PackedBuffer {
 
   rewind(): this {
     this.idx = 0;
+    this.tokenList = [];  // because we need to be able to re-read tokens as the "first time" we've seen them.
     return this
   }
 
   /**
-   * Returns the next byte that would be read, without actually reading it.
+   * Registers a serializer for a given type.
    */
-  // peek(): number {
-  //     return this.buf[this.idx];
-  // }
+  registerSerializer<T>(serializer: ISerializeInstructions<T>): this {
+    this.registeredSerializers.set(serializer.name, serializer);
+    return this
+  }
 
   /**
    * Gets number of bytes allocated, which is typically more than the current index, i.e. more than is currently in-use.
@@ -341,6 +381,23 @@ export class PackedBuffer {
   }
 
   /**
+   * Writes a specific serializable object, along with a type token that allows us to unseralize it later.
+   */
+  writeRegisteredSerializable(x: ISerializable<any>): this {
+    const inst = x.serializationInstructions
+    this.writeToken(inst.name)
+    inst.serialize(this, x)
+    return this
+  }
+
+  readRegisteredSerializable<T>(): ISerializable<T> {
+    const name = this.readToken();
+    const inst = this.registeredSerializers.get(name);
+    if (!inst) throw new Error(`no registered serializer for type: ${name}`);
+    return inst.unserialize(this)
+  }
+
+  /**
    * Write any serializable type. The primatives take no more space than if they were encoded directly.
    * More complex types are encoded efficiently, but probably not quite as well as if they had specialized algorithms.
    * With objects, fields are encoded as tokens, anticipating having many of the same type of object.
@@ -395,6 +452,9 @@ export class PackedBuffer {
     } else if (x instanceof Set) {
       this.buf[this.idx++] = TYPE_SET;
       this.writeArray(Array.from(x), (buf, el) => buf.writeSerializable(el));
+    } else if (isObjectSerializable(x)) {
+      this.buf[this.idx++] = TYPE_REGISTERED;
+      this.writeRegisteredSerializable(x);
     } else if (typeof x === "object") {
       this.buf[this.idx++] = TYPE_STROBJECT;
       this.writeArray(Object.entries(x), (buf, el) => buf.writeToken(el[0]).writeSerializable(el[1]));
@@ -434,6 +494,7 @@ export class PackedBuffer {
       case TYPE_ARRAY: return this.readArray((buf) => buf.readSerializable());
       case TYPE_SET: return new Set(this.readArray((buf) => buf.readSerializable()));
       case TYPE_STROBJECT: return Object.fromEntries(this.readArray((buf) => { const k = buf.readToken(); return [k, buf.readSerializable()] }));
+      case TYPE_REGISTERED: return this.readRegisteredSerializable();
 
     }
     throw new Error(`invalid scalar prefix byte: ${t}`);
